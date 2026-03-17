@@ -1,0 +1,47 @@
+project_name = "skate3"
+file_path = "/home/rexx/Escritorio/Xbox/xe3x/x.xex_uncrypted.xex"
+out_directory_path = "generated"
+
+[analysis]
+max_jump_extension = 262144
+max_function_size = 1048576
+aggressive_analysis = true
+detect_all_functions = true
+
+[functions]
+# Game initialization functions
+0x82001000 = { name = "skate3_init_start", size = 0x100 }
+0x82002000 = { name = "skate3_main_init", size = 0x200 }
+0x82003000 = { name = "skate3_system_init", size = 0x300 }
+
+# Memory functions
+0x824694A0 = { name = "RtlAllocateHeap", size = 0x894 }
+0x82469D88 = { name = "RtlFreeHeap", size = 0x294 }
+0x82468738 = { name = "RtlSizeHeap", size = 0xA8 }
+
+# File I/O functions  
+0x8248B780 = { name = "CreateFileA", size = 0x1E4 }
+0x8248CBF8 = { name = "ReadFile", size = 0x164 }
+0x8248B500 = { name = "WriteFile", size = 0x128 }
+0x8248B2D8 = { name = "CloseHandle", size = 0x38 }
+
+# String functions
+0x826BF770 = { name = "memcpy", size = 0x420 }
+0x826BFCF0 = { name = "memset", size = 0xA0 }
+0x826C0480 = { name = "memmove", size = 0xBC }
+0x826BF4F0 = { name = "strncmp", size = 0x4C }
+0x826C1860 = { name = "strchr", size = 0x3C }
+
+# Render/GPU functions (common addresses)
+0x82030000 = { name = "gpu_init", size = 0x100 }
+0x82031000 = { name = "render_init", size = 0x200 }
+0x82032000 = { name = "draw_init", size = 0x150 }
+
+# Jump table stubs
+0x82EC9BB0 = { name = "unresolved_jt_1" }
+0x82B0C658 = { name = "unresolved_jt_2" }
+0x82B0C700 = { name = "unresolved_jt_3" }
+0x82B0C800 = { name = "unresolved_jt_4" }
+
+[jump_tables]
+detect_patterns = ["xex_standard", "xex_alternate", "skate_series"]

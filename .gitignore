@@ -1,0 +1,13 @@
+# Build and Generated Files
+build/
+generated/
+bin/
+
+# Logs and Debug
+*.log
+JUMP_TABLES_REPORT.txt
+
+# IDE and System
+.vscode/
+.DS_Store
+.gemini/
