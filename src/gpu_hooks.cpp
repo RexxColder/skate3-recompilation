@@ -81,7 +81,10 @@ void sub_82A60208(PPCContext& ctx, uint8_t* base) {
       // Allocate the main 152-byte struct (matches original allocation size)
       g_guestDeviceAddress = runtime->memory()->SystemHeapAlloc(256);
       g_guestVTableAddress = runtime->memory()->SystemHeapAlloc(1024);
-      g_guestMethodThunksBase = runtime->memory()->SystemHeapAlloc(1024);
+      // Allocate thunks in the function table thunk reserve (past the end of the code segment)
+      // skate3 code ends at ~0x82F734D4, and the reserve adds 64KB (0x10000) up to 0x82F834D4.
+      // We pick a safe address inside the reserve that won't conflict with real code.
+      g_guestMethodThunksBase = 0x82F80000;
       g_guestDummyStringBuffer = runtime->memory()->SystemHeapAlloc(2048);
       g_guestDummyPathBuffer = runtime->memory()->SystemHeapAlloc(2048);
       
@@ -199,6 +202,11 @@ void sub_82A60208(PPCContext& ctx, uint8_t* base) {
   *(rex::be<uint32_t>*)(base + 0x830286B4) = devInterface;
   REXLOG_INFO("Stored D3D interface 0x{:08X} at 0x83068694 and 0x830286B4", devInterface);
   
+  // Call PostInit
+  REXLOG_INFO("Calling sub_82A60970 (PostInit) naturally before returning from CreateDevice...");
+  auto fn970 = runtime->memory()->GetFunction(0x82A60970);
+  if (fn970) fn970(ctx, base);
+  
   // CRITICAL: Return the device struct pointer in r3!
   // The caller (sub_8293F460) reads r3+8 onwards after we return.
   ctx.r3.u64 = (uint64_t)dev;
@@ -308,11 +316,117 @@ void sub_82A60600_Hook(PPCContext& ctx, uint8_t* base) {
   // The game's resource loading works via VFS, so these search paths aren't needed.
 }
 
-// PHASE D.3: Stub post-init validation 
-void sub_82A60970_Hook(PPCContext& ctx, uint8_t* base) {
-  REXLOG_INFO("sub_82A60970 (PostInit) STUBBED");
-  // Skip post-device-creation validation that may read from our fake structs
+
+// PHASE D.5: Native C++ replacement for sub_82A603F0
+// Creates a 192-byte resource registration object, initializes critical sections,
+// semaphores, linked lists, and links into the device struct.
+// Replaces VTable[1] Allocate(192) call with direct SystemHeapAlloc.
+void sub_82A603F0(PPCContext& ctx, uint8_t* base) {
+  uint32_t dev = ctx.r3.u32;    // device struct
+  uint32_t owner = ctx.r4.u32;  // owner/parent pointer
+  uint32_t flags = ctx.r5.u32;  // flags (bit 0 = async mode)
+  
+  REXLOG_INFO("sub_82A603F0: dev=0x{:08X}, owner=0x{:08X}, flags={}", dev, owner, flags);
+  
+  auto runtime = rex::Runtime::instance();
+  auto memory = runtime->memory();
+  
+  // Enter critical section at dev+112
+  uint32_t cs_addr = dev + 112;
+  auto enterCS = memory->GetFunction(0x82A17AA0);
+  if (enterCS) {
+    ctx.r3.u64 = (uint64_t)cs_addr;
+    ctx.r4.s64 = -2111504384 + 2360;  // caller ID
+    enterCS(ctx, base);
+  }
+  
+  // Allocate 192 bytes
+  uint32_t obj = memory->SystemHeapAlloc(192);
+  memory->Zero(obj, 192);
+  
+  REXLOG_INFO("  Allocated resource obj=0x{:08X} (192 bytes)", obj);
+  
+  if (obj == 0) {
+    ctx.r3.u64 = (uint64_t)cs_addr;
+    auto leaveCS = memory->GetFunction(0x82F71EBC);
+    if (leaveCS) leaveCS(ctx, base);
+    ctx.r3.u64 = 0;
+    return;
+  }
+  
+  // Initialize fields
+  *(uint8_t*)(base + obj + 8) = 0;
+  *(uint8_t*)(base + obj + 9) = 0;
+  *(uint8_t*)(base + obj + 10) = (flags & 1);
+  
+  // Self-referencing linked list at +12/+16
+  uint32_t list_node = obj + 12;
+  *(rex::be<uint32_t>*)(base + obj + 16) = list_node;
+  *(rex::be<uint32_t>*)(base + obj + 12) = list_node;
+  
+  // Init critical section at obj+24
+  auto initCS = memory->GetFunction(0x82A17A38);
+  if (initCS) {
+    ctx.r3.u64 = (uint64_t)(obj + 24);
+    ctx.r4.s64 = 1;
+    initCS(ctx, base);
+  }
+  
+  // Init semaphore at obj+64
+  auto initSem = memory->GetFunction(0x82A17520);
+  if (initSem) {
+    ctx.r3.u64 = (uint64_t)(obj + 64);
+    ctx.r4.s64 = 1;
+    initSem(ctx, base);
+  }
+  
+  *(rex::be<uint32_t>*)(base + obj + 152) = 0;
+  
+  // Init structure at obj+156
+  auto initFn3 = memory->GetFunction(0x82A17F38);
+  if (initFn3) {
+    ctx.r3.u64 = (uint64_t)(obj + 156);
+    ctx.r4.s64 = 1;
+    initFn3(ctx, base);
+  }
+  
+  // Store owner and zero fields
+  *(rex::be<uint32_t>*)(base + obj + 176) = owner;
+  *(rex::be<uint32_t>*)(base + obj + 172) = 0;
+  *(rex::be<uint64_t>*)(base + obj + 184) = 0;
+  *(rex::be<uint32_t>*)(base + obj + 0) = 0;
+  *(rex::be<uint32_t>*)(base + obj + 4) = 0;
+  
+  // If async, start resource thread
+  if (flags & 1) {
+    auto startThread = memory->GetFunction(0x82A60D70);
+    if (startThread) {
+      ctx.r3.u64 = (uint64_t)obj;
+      startThread(ctx, base);
+    }
+  }
+  
+  // Link into device struct linked list
+  uint32_t dev_global = *(rex::be<uint32_t>*)(base + 0x830286B0);
+  uint32_t dev_next = *(rex::be<uint32_t>*)(base + dev_global + 4);
+  
+  *(rex::be<uint32_t>*)(base + obj + 0) = dev_global;
+  *(rex::be<uint32_t>*)(base + obj + 4) = dev_next;
+  *(rex::be<uint32_t>*)(base + dev_global + 4) = obj;
+  
+  if (dev_next != 0) {
+    *(rex::be<uint32_t>*)(base + dev_next + 0) = obj;
+  }
+  
+  // Leave critical section
+  ctx.r3.u64 = (uint64_t)cs_addr;
+  auto leaveCS = memory->GetFunction(0x82F71EBC);
+  if (leaveCS) leaveCS(ctx, base);
+  
+  REXLOG_INFO("  sub_82A603F0 returning obj=0x{:08X}", obj);
+  ctx.r3.u64 = (uint64_t)obj;
 }
+
 
 // PHASE D.3: Hook VdSetGraphicsInterruptCallback to trace/store the callback
 void VdSetGraphicsInterruptCallback_Hook(PPCContext& ctx, uint8_t* base) {
@@ -413,9 +527,9 @@ void VideoHooks::Initialize() {
   
   // D3D Device creation + path parser stubs
   HookFunction(0x82A60208, &::sub_82A60208);
+  HookFunction(0x82A603F0, &::sub_82A603F0);  // PHASE D.5: resource registration (strong symbol)
   HookFunction(0x82A60600, &::sub_82A60600_Hook);  // PHASE D.3: stub path parser
-  HookFunction(0x82A60970, &::sub_82A60970_Hook);  // PHASE D.3: stub post-init
-  HookFunction(0x8293F460, &::sub_8293F460_Hook);  // PHASE D.3: trace caller
+  HookFunction(0x8293F460, &::sub_8293F460_Hook);  // PHASE D.3: full caller replacement
   HookFunction(0x826B57D0, &::sub_826B57D0_Hook);  // PHASE D.3: trace pointer at entry
   
   // Memory safety
