@@ -6,4 +6,6 @@
 - Surpassed `sub_82A5ED78`'s previous SIGSEGV entirely. The engine is progressing to deeper execution stages within `sub_826B57D0`.
 
 # Next Steps
+- Trace the deadlock occurring after Direct3D device creation.
 - Trace the new crash discovered at `sub_829F2FB8`.
+- Set up GDB debugging to analyze engine state during the infinite wait.

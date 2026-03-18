@@ -15,9 +15,10 @@
 - **Custom Memory Allocation**: The game can now use our `Allocate` stub for its internal buffers.
 
 ### What's Missing (Next Steps):
-- ❌ **Main Iteration Deadlock**: After initializing the device, the main thread seems to enter an infinite wait or silent halt.
-- 1. Re-investigate the exact freeze point with **GDB** after bypassing `sub_82A60B90`.
-- 2. Implement more VTable stubs if we detect more missing indirect calls.
+- ❌ **Main Iteration Deadlock**: After initializing the device, the engine experiences a silent halt (threads waiting on synchronization objects).
+- ❌ **Crash at `sub_829F2FB8`**: A new crash point has been discovered and needs to be traced.
+- 1. Use **GDB** to attach to the ReXGlue runtime and locate the exact freeze point / wait loop.
+- 2. Investigate the execution path leading to `sub_829F2FB8` to determine the cause of the crash.
 
 ### Key Files:
 - `src/gpu_hooks.h` / `.cpp`: Interception system with 10 active hooks.
